@@ -25,7 +25,7 @@ class TestOmdbRym(unittest.TestCase):
         self.assertEqual(omdb_rym.get_imdb_string(5), 'tt0000005')
 
         # two digit input
-        self.asomdbsertEqual(omdb_rym.get_imdb_string(55), 'tt0000055')
+        self.assertEqual(omdb_rym.get_imdb_string(55), 'tt0000055')
 
         # three digit input
         self.assertEqual(omdb_rym.get_imdb_string(555), 'tt0000555')
@@ -70,13 +70,17 @@ class TestOmdbRym(unittest.TestCase):
         # start point > end point
         self.assertIsNotNone(omdb_rym.add_movies(user_api_key, 9, 8))
 
-        with self.assertRaises(SystemExit):
-            # blank start point
-            omdb_rym.add_movies(user_api_key, '', 2)
-            # blank end point
-            omdb_rym.add_movies(user_api_key, 2, '')
-            # blank start and end points
-            omdb_rym.add_movies(user_api_key, '', '')
+        # start point is blank string
+        self.assertIsNotNone(omdb_rym.add_movies(user_api_key, '', 2))
+
+        # end point is blank string
+        self.assertIsNotNone(omdb_rym.add_movies(user_api_key, 2, ''))
+
+        # both points are blank strings
+        self.assertIsNotNone(omdb_rym.add_movies(user_api_key, '', ''))
+
+        # both points are non-blank, nonnumeric strings
+        self.assertIsNotNone(omdb_rym.add_movies(user_api_key, 'asdf', 'asdf'))
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 """Retrieve films from OMDb and check which films are on RYM."""
 
+import os
 import re
 import time
 from contextlib import suppress
@@ -14,47 +15,75 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 
 
+def check_movie_list_existence():
+    """Check if movie list exists.
+
+    Returns:
+        boolean for whether list exists
+    """
+    return os.path.isfile('movie_list.csv')
+
+
+def read_movie_list():
+    """Read movie list as dataframe.
+
+    Returns:
+        movie list as dataframe
+    """
+    with open('movie_list.csv', 'r'):
+        dataframe = pd.read_csv('movie_list.csv')
+    return dataframe
+
+
+def create_movie_list():
+    """Create new movie list.
+
+    Returns:
+        empty dataframe for new movie list
+    """
+    return pd.DataFrame(
+        columns=[
+            'title',
+            'year',
+            'rated',
+            'released',
+            'runtime',
+            'genre',
+            'director',
+            'writer',
+            'actors',
+            'plot',
+            'language',
+            'country',
+            'awards',
+            'poster',
+            'ratings',
+            'metascore',
+            'imdb_rating',
+            'imdb_votes',
+            'imdb_id',
+            'type',
+            'dvd',
+            'box_office',
+            'production',
+            'website',
+            'response',
+            'in_rym',
+        ],
+    )
+
+
 def get_movie_list():
     """Read dataframe if it exists, else create new one.
 
     Returns:
         dataframe with movie information
     """
-    try:
-        with open('movie_list.csv', 'r'):
-            dataframe = pd.read_csv('movie_list.csv')
-    except IOError:
-        dataframe = pd.DataFrame(
-            columns=[
-                'title',
-                'year',
-                'rated',
-                'released',
-                'runtime',
-                'genre',
-                'director',
-                'writer',
-                'actors',
-                'plot',
-                'language',
-                'country',
-                'awards',
-                'poster',
-                'ratings',
-                'metascore',
-                'imdb_rating',
-                'imdb_votes',
-                'imdb_id',
-                'type',
-                'dvd',
-                'box_office',
-                'production',
-                'website',
-                'response',
-                'in_rym',
-            ],
-        )
-    return dataframe
+    if check_movie_list_existence():
+        movie_list = read_movie_list()
+    else:
+        movie_list = create_movie_list()
+    return movie_list
 
 
 def get_imdb_string(number):
@@ -79,9 +108,46 @@ def get_movie(imdb_id, api_key):
     Returns:
         omdb info from imdb_id
     """
-    # Add details to returns dicstring
     omdb.set_default('apikey', api_key)
     return omdb.imdbid(imdb_id)
+
+
+def validate_input(start, end):
+    """Convert start and end strings to ints.
+
+    Args:
+        start: starting value
+        end: ending value
+
+    Returns:
+        start, end as ints
+    """
+    try:
+        start = int(start)
+    except ValueError:
+        start = 0
+
+    try:
+        end = int(end)
+    except ValueError:
+        end = 9999999
+
+    return (start, end)
+
+
+def add_individual_movie(movie, dataframe, api_key):
+    """Add individual movie to dataframe.
+
+    Args:
+        movie: movie to add
+        dataframe: place movie is added to
+        api_key: user api key
+
+    Returns:
+        updated dataframe
+    """
+    movie_data = get_movie(movie, api_key)
+    return dataframe.append(movie_data, ignore_index=True)
 
 
 def add_movies(api_key, start, end):
@@ -95,9 +161,7 @@ def add_movies(api_key, start, end):
     Returns:
         dataframe of movies with data
     """
-    with suppress(ValueError):
-        start = int(start)
-        end = int(end)
+    start, end = validate_input(start, end)
 
     dataframe = get_movie_list()
 
@@ -109,18 +173,14 @@ def add_movies(api_key, start, end):
         time.sleep(sleep_amount)
         movie_string = get_imdb_string(start)
         if not dataframe['imdb_id'].str.contains(movie_string).any():
-            movie_data = get_movie(movie_string, api_key)
-            if not movie_data:
-                print(movie_string)
-                break
-            dataframe = dataframe.append(movie_data, ignore_index=True)
+            dataframe = add_individual_movie(movie_string, dataframe, api_key)
         start += 1
 
     return dataframe
 
 
 def create_browser_instance():
-    """Create browser instance of RYM
+    """Create browser instance of RYM.
 
     Returns:
         chrome browser with RYM
@@ -140,6 +200,36 @@ def create_browser_instance():
     return driver
 
 
+def get_search_results(browser_instance, searchterm, not_checked):
+    """Search for movie in RYM.
+
+    Args:
+        browser_instance: instance of browser
+        searchterm: movie to search for
+        not_checked: movies in df not checked
+
+    Returns:
+        soup of search results
+    """
+    searchbar = browser_instance.find_element_by_name('searchterm')
+    searchbar.click()
+    ActionChains(browser_instance).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.DELETE).perform()
+    searchbar.send_keys(not_checked['title'].iloc[searchterm])
+    search_type = browser_instance.find_element_by_class_name('search_options_frame')
+    ActionChains(browser_instance).move_to_element(search_type).perform()
+    search_type_film = browser_instance.find_element_by_id('searchtype_F')
+    ActionChains(browser_instance).click_and_hold(search_type_film).release().perform()
+    search_enter = browser_instance.find_element_by_id('mainsearch_submit')
+    ActionChains(browser_instance).click_and_hold(search_enter).release().perform()
+
+    searchresults = SoupStrainer(id='searchresults')
+    return BeautifulSoup(
+        browser_instance.page_source,
+        'lxml',
+        parse_only=searchresults,
+    )
+
+
 def search_rym(dataframe):
     """Check if movie is on RYM.
 
@@ -156,23 +246,7 @@ def search_rym(dataframe):
     driver = create_browser_instance()
 
     for index in enumerate(not_checked):
-        searchbar = driver.find_element_by_name('searchterm')
-        searchbar.click()
-        ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.DELETE).perform()
-        searchbar.send_keys(not_checked['title'].iloc[index])
-        search_type = driver.find_element_by_class_name('search_options_frame')
-        ActionChains(driver).move_to_element(search_type).perform()
-        search_type_film = driver.find_element_by_id('searchtype_F')
-        ActionChains(driver).click_and_hold(search_type_film).release().perform()
-        search_enter = driver.find_element_by_id('mainsearch_submit')
-        ActionChains(driver).click_and_hold(search_enter).release().perform()
-
-        searchresults = SoupStrainer(id='searchresults')
-        soup = BeautifulSoup(
-            driver.page_source,
-            'lxml',
-            parse_only=searchresults,
-        )
+        soup = get_search_results(driver, index, not_checked)
 
         # checks if movies are in RYM database
         dataframe['in_rym'].loc[
@@ -257,7 +331,7 @@ def main(api_key, start, end):
     movie_list = add_movies(api_key, start, end)
     movie_list = search_rym(movie_list)
     return create_non_rym_dataframe(movie_list)
-omdb
+
 
 if __name__ == '__main__':
     user_api_key = input('Enter your API key: ')
